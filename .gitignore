@@ -1,0 +1,16 @@
+# Environment Isolation Exclusions
+venv/
+.venv/
+env/
+ENV/
+
+# Python Performance Caching
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local Telemetry Log Exclusions
+*results.json
+telemetry_report.json
+.env

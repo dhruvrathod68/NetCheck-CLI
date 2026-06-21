@@ -1,0 +1,76 @@
+{
+  "endpoints": [
+    {
+      "name": "GitHub",
+      "url": "https://github.com/{}",
+      "validation_type": "status_code",
+      "expected_value": 200
+    },
+    {
+      "name": "DockerHub",
+      "url": "https://hub.docker.com/v2/users/{}/",
+      "validation_type": "status_code",
+      "expected_value": 200
+    },
+    {
+      "name": "GitLab",
+      "url": "https://gitlab.com/{}",
+      "validation_type": "status_code",
+      "expected_value": 200
+    },
+    {
+      "name": "PyPI (Python Packages)",
+      "url": "https://pypi.org/user/{}/",
+      "validation_type": "status_code",
+      "expected_value": 200
+    },
+    {
+      "name": "NPM Registry",
+      "url": "https://www.npmjs.com/~{}",
+      "validation_type": "status_code",
+      "expected_value": 200
+    },
+    {
+      "name": "Dev.to",
+      "url": "https://dev.to/{}",
+      "validation_type": "status_code",
+      "expected_value": 200
+    },
+    {
+      "name": "Hashnode",
+      "url": "https://hashnode.com/@{}",
+      "validation_type": "status_code",
+      "expected_value": 200
+    },
+    {
+      "name": "Reddit",
+      "url": "https://www.reddit.com/user/{}/",
+      "validation_type": "status_code",
+      "expected_value": 200
+    },
+    {
+      "name": "Vimeo",
+      "url": "https://vimeo.com/{}",
+      "validation_type": "status_code",
+      "expected_value": 200
+    },
+    {
+      "name": "Pinterest",
+      "url": "https://www.pinterest.com/{}/",
+      "validation_type": "status_code",
+      "expected_value": 200
+    },
+    {
+      "name": "BuyMeACoffee",
+      "url": "https://www.buymeacoffee.com/{}",
+      "validation_type": "status_code",
+      "expected_value": 200
+    },
+    {
+      "name": "Bitbucket API",
+      "url": "https://api.bitbucket.org/2.0/users/{}",
+      "validation_type": "status_code",
+      "expected_value": 200
+    }
+  ]
+}
