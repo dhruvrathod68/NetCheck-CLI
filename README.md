@@ -41,11 +41,11 @@ Traditional footprinting and status-checking tools execute requests sequentially
 [Worker Task] [Worker Task] [Worker Task]  <-- Managed concurrently by Event Loop
 │             │             │
 └─────────────┼─────────────┘
-▼
-[Data Aggregator Module]
-│
-┌─────────┴─────────┐
-▼                   ▼
+              ▼
+ [Data Aggregator Module]
+            │
+  ┌─────────┴─────────┐
+  ▼                   ▼
 [Terminal UI Log]   [Structured JSON Export]
 ```
 
