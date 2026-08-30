@@ -7,6 +7,8 @@ and network endpoint auditing utility.
 import asyncio
 import json
 import argparse
+import sys
+import os
 import aiohttp
 from typing import List, Dict, Any
 from colorama import Fore, Style, init
@@ -20,7 +22,14 @@ def load_endpoints(filepath: str = "config/endpoints.json", target: str = None) 
     and dynamically formats placeholder URLs if a target value is provided.
     """
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
+        resolved_path = filepath
+        if not os.path.isabs(filepath) and not os.path.exists(filepath):
+            module_dir = os.path.dirname(os.path.abspath(__file__))
+            alt_path = os.path.join(module_dir, filepath)
+            if os.path.exists(alt_path):
+                resolved_path = alt_path
+
+        with open(resolved_path, "r", encoding="utf-8") as f:
             data: Dict[str, Any] = json.load(f)
             endpoints: List[Dict[str, Any]] = data.get("endpoints", [])
             
@@ -120,5 +129,13 @@ async def main() -> None:
 
     save_report(args.output, records)
 
+def cli() -> None:
+    """CLI entrypoint for console_scripts."""
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print(f"\n{Fore.YELLOW}Audit interrupted by user.{Style.RESET_ALL}")
+        sys.exit(0)
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    cli()

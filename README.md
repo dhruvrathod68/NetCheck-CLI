@@ -59,11 +59,12 @@ Traditional footprinting and status-checking tools execute requests sequentially
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/yourusername/NetCheck-CLI.git
+git clone https://github.com/dhruvrathod68/NetCheck-CLI.git
+
 cd NetCheck-CLI
 ```
 
-### 2. Environment Isolation Setup
+### 2. Environment Isolation & Package Setup
 
 #### On Windows (PowerShell):
 ```powershell
@@ -73,8 +74,8 @@ python -m venv venv
 # Activate virtual environment
 .\venv\Scripts\Activate.ps1
 
-# Install pinned production dependencies
-pip install -r requirements.txt
+# Install package in editable development mode
+pip install -e .
 ```
 
 #### On Linux / Kali Linux (Bash):
@@ -85,28 +86,28 @@ python3 -m venv venv
 # Activate virtual environment
 source venv/bin/activate
 
-# Install pinned production dependencies
-pip install -r requirements.txt
+# Install package in editable development mode
+pip install -e .
 ```
 
 ---
 
 ## 💻 Usage & Examples
 
-The tool evaluates targets by reading signatures from `config/endpoints.json` and injecting runtime target values into string placeholder paths dynamically.
+The tool evaluates targets by reading signatures from `config/endpoints.json` and injecting runtime target values into string placeholder paths dynamically. Once installed, invoke using `netcheckcli` (or the shortcut `netcheck`).
 
 ### Basic Application Execution
 Run a validation check against the default endpoint registry and export logs to the default `results.json` matrix:
 
 ```bash
-python main.py --target "developer_handle"
+netcheckcli --target "developer_handle"
 ```
 
 ### Custom Document Report Redirection
 Target a specific system identifier and route the production JSON telemetry matrix directly to a custom file path:
 
 ```bash
-python main.py --target "audit-target-handle" --output telemetry_report.json
+netcheckcli --target "audit-target-handle" --output telemetry_report.json
 ```
 
 ### Extending Target Databases
@@ -130,8 +131,10 @@ NetCheck-CLI/
 │
 ├── config/
 │   └── endpoints.json       # Decoupled Target Data Layer
-├── main.py                  # Core Asynchronous Execution Loop
+├── main.py                  # Core Asynchronous Execution Loop & CLI Entrypoint
 ├── requirements.txt         # Pinned Package Metadata Dependency List
+├── setup.py                 # Setuptools Package Configuration & Console Scripts
+├── LICENSE                  # MIT Operational License
 └── README.md                # Enterprise Documentation Module
 ```
 

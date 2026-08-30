@@ -10,6 +10,12 @@ __pycache__/
 *.pyo
 *.pyd
 
+# Packaging and Build Distribution
+*.egg-info/
+build/
+dist/
+*.egg
+
 # Local Telemetry Log Exclusions
 *results.json
 telemetry_report.json
