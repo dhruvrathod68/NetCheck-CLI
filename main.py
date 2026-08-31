@@ -1,317 +1,250 @@
 #!/usr/bin/env python3
 """
-NetCheck-CLI (netcheck-osint): A high-performance, asynchronous digital identity validation 
-and network endpoint auditing utility.
+NetCheck-OSINT: High-performance asynchronous digital identity and endpoint auditing utility.
 """
 
-import asyncio
-import json
-import argparse
 import sys
 import os
+import json
 import time
-from pathlib import Path
-from typing import List, Dict, Any, Optional
+import asyncio
+import argparse
 import aiohttp
+import pathlib
+from typing import List, Dict, Any, Optional
 from colorama import Fore, Style, init
-
-# Ensure stdout uses UTF-8 if supported
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
 
 # Initialize colorama for cross-platform auto-resetting terminal colors
 init(autoreset=True)
 
-# Standard browser emulation headers to prevent false-positive WAF/bot blocking
-DEFAULT_HEADERS: Dict[str, str] = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-}
+DEFAULT_ENDPOINTS: List[Dict[str, Any]] = [
+    {"name": "GitHub", "url": "https://github.com/{}", "expected_value": 200},
+    {"name": "DockerHub", "url": "https://hub.docker.com/v2/users/{}/", "expected_value": 200},
+    {"name": "GitLab", "url": "https://gitlab.com/{}", "expected_value": 200},
+    {"name": "PyPI (Python Packages)", "url": "https://pypi.org/user/{}/", "expected_value": 200},
+    {"name": "NPM Registry", "url": "https://www.npmjs.com/~{}", "expected_value": 200},
+    {"name": "Dev.to", "url": "https://dev.to/{}", "expected_value": 200},
+    {"name": "Hashnode", "url": "https://hashnode.com/@{}", "expected_value": 200},
+    {"name": "Reddit", "url": "https://www.reddit.com/user/{}/", "expected_value": 200},
+    {"name": "Vimeo", "url": "https://vimeo.com/{}", "expected_value": 200},
+    {"name": "Pinterest", "url": "https://www.pinterest.com/{}/", "expected_value": 200},
+    {"name": "BuyMeACoffee", "url": "https://www.buymeacoffee.com/{}", "expected_value": 200},
+    {"name": "Bitbucket API", "url": "https://api.bitbucket.org/2.0/users/{}", "expected_value": 200}
+]
 
 
-def get_default_config_path() -> Path:
+def load_endpoints(target: str, config_path: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Dynamically resolves the absolute path to 'config/endpoints.json' relative to 
-    the package location, ensuring reliable operation when installed globally.
+    Loads target endpoints from a custom config file, local config/endpoints.json,
+    or falls back to the embedded default registry.
     """
-    package_dir: Path = Path(__file__).resolve().parent
-    config_file: Path = package_dir / "config" / "endpoints.json"
-    if config_file.exists():
-        return config_file
-    
-    # Fallback to current working directory if available
-    cwd_config: Path = Path.cwd() / "config" / "endpoints.json"
-    if cwd_config.exists():
-        return cwd_config
+    raw_endpoints: List[Dict[str, Any]] = []
 
-    return config_file
+    # 1. Check custom path if provided
+    if config_path:
+        custom_p = pathlib.Path(config_path)
+        if custom_p.exists():
+            try:
+                with open(custom_p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    raw_endpoints = data.get("endpoints", [])
+            except Exception as e:
+                print(f"{Fore.RED}[!] Error reading custom config '{config_path}': {e}{Style.RESET_ALL}")
+                return []
+        else:
+            print(f"{Fore.RED}[!] Specified config file not found: '{config_path}'{Style.RESET_ALL}")
+            return []
+
+    # 2. Check local working directory config/endpoints.json
+    if not raw_endpoints:
+        local_p = pathlib.Path.cwd() / "config" / "endpoints.json"
+        if local_p.exists():
+            try:
+                with open(local_p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    raw_endpoints = data.get("endpoints", [])
+            except Exception:
+                raw_endpoints = []
+
+    # 3. Fallback to embedded registry
+    if not raw_endpoints:
+        raw_endpoints = DEFAULT_ENDPOINTS
+
+    # Format URLs with the target username
+    endpoints: List[Dict[str, Any]] = []
+    for ep in raw_endpoints:
+        url_template = ep.get("url", "")
+        formatted_url = url_template.format(target) if "{}" in url_template else url_template
+        endpoints.append({
+            "name": ep.get("name", "Unknown Service"),
+            "url": formatted_url,
+            "expected_value": ep.get("expected_value", 200)
+        })
+
+    return endpoints
 
 
-def load_endpoints(filepath: Optional[str] = None, target: Optional[str] = None) -> List[Dict[str, Any]]:
-    """
-    Reads the configuration file, returns the list of target endpoints,
-    and dynamically formats placeholder URLs if a target value is provided.
-    """
-    if filepath:
-        resolved_path = Path(filepath)
-    else:
-        resolved_path = get_default_config_path()
-
-    try:
-        with open(resolved_path, "r", encoding="utf-8") as f:
-            data: Dict[str, Any] = json.load(f)
-            endpoints: List[Dict[str, Any]] = data.get("endpoints", [])
-
-            if target:
-                for ep in endpoints:
-                    url: str = ep.get("url", "")
-                    if "{}" in url:
-                        ep["url"] = url.format(target)
-            return endpoints
-    except FileNotFoundError:
-        print(f"{Fore.RED}[!] Config Error: File not found at '{resolved_path}'.{Style.RESET_ALL}")
-        return []
-    except json.JSONDecodeError as e:
-        print(f"{Fore.RED}[!] Config Error: Corrupt JSON in '{resolved_path}': {e}{Style.RESET_ALL}")
-        return []
-
-
-async def check_endpoint(session: aiohttp.ClientSession, endpoint_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Executes an explicit status check on a target endpoint using an active ClientSession.
-    Renders Shodan-style terminal output badges and returns structured telemetry.
-    """
-    name: str = endpoint_data.get("name", "Unknown Service")
-    url: str = endpoint_data.get("url", "")
-    expected: int = endpoint_data.get("expected_value", 200)
+async def check_endpoint(session: aiohttp.ClientSession, endpoint: Dict[str, Any]) -> Dict[str, Any]:
+    """Asynchronously queries an endpoint and records status telemetry."""
+    name: str = endpoint["name"]
+    url: str = endpoint["url"]
+    expected: int = endpoint["expected_value"]
 
     record: Dict[str, Any] = {
         "service_name": name,
         "target_url": url,
-        "expected_value": expected,
         "status_code": None,
-        "category": "UNKNOWN",
+        "state": "ERROR",
         "match_status": False,
+        "latency_ms": 0.0
     }
 
-    if not url:
-        print(f"{Fore.RED}[!] ERROR{Style.RESET_ALL}     {name:<16} | Missing target URL")
-        record["status_code"] = "MISSING_URL"
-        record["category"] = "ERROR"
-        return record
-
+    start_time = time.perf_counter()
     timeout = aiohttp.ClientTimeout(total=5.0)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
 
     try:
-        async with session.get(url, timeout=timeout, headers=DEFAULT_HEADERS, allow_redirects=True) as response:
-            status: int = response.status
+        async with session.get(url, timeout=timeout, headers=headers, allow_redirects=True) as response:
+            latency = (time.perf_counter() - start_time) * 1000
+            status = response.status
             record["status_code"] = status
+            record["latency_ms"] = round(latency, 2)
 
-            if status == 200:
+            if status == expected:
+                record["state"] = "FOUND"
                 record["match_status"] = True
-                record["category"] = "FOUND"
-                # Clickable Cyan URL
-                print(
-                    f"{Fore.GREEN}{Style.BRIGHT}[+] FOUND{Style.RESET_ALL}     "
-                    f"{name:<16} -> {Fore.CYAN}{url}{Style.RESET_ALL}"
-                )
+                print(f" {Fore.GREEN}[+] FOUND     {Style.RESET_ALL} {Fore.WHITE}{name:<22}{Style.RESET_ALL} -> {Fore.CYAN}{url}{Style.RESET_ALL}")
             elif status == 404:
-                record["category"] = "NOT_FOUND"
-                # Dimmed text for 404 responses
-                print(f"{Fore.LIGHTBLACK_EX}[-] NOT FOUND {name:<16} -> {url}{Style.RESET_ALL}")
+                record["state"] = "NOT_FOUND"
+                print(f" {Fore.BLACK}{Style.BRIGHT}[-] NOT FOUND {Style.RESET_ALL} {Fore.WHITE}{name:<22}{Style.RESET_ALL} {Fore.BLACK}(404 Not Found){Style.RESET_ALL}")
             elif status in (403, 429):
-                record["category"] = "BLOCKED"
-                print(
-                    f"{Fore.YELLOW}{Style.BRIGHT}[!] BLOCKED{Style.RESET_ALL}   "
-                    f"{name:<16} -> {url} (HTTP {status}){Style.RESET_ALL}"
-                )
+                record["state"] = "BLOCKED"
+                reason = "Rate Limited / WAF" if status == 429 else "Access Denied / WAF"
+                print(f" {Fore.YELLOW}[!] BLOCKED   {Style.RESET_ALL} {Fore.WHITE}{name:<22}{Style.RESET_ALL} {Fore.YELLOW}(HTTP {status} - {reason}){Style.RESET_ALL}")
             else:
-                matched: bool = (status == expected)
-                record["match_status"] = matched
-                record["category"] = "OTHER"
-                if matched:
-                    print(
-                        f"{Fore.GREEN}{Style.BRIGHT}[+] FOUND{Style.RESET_ALL}     "
-                        f"{name:<16} -> {Fore.CYAN}{url}{Style.RESET_ALL} (HTTP {status})"
-                    )
-                else:
-                    print(
-                        f"{Fore.LIGHTBLACK_EX}[-] STATUS    {name:<16} -> {url} (HTTP {status}){Style.RESET_ALL}"
-                    )
+                record["state"] = "UNEXPECTED"
+                print(f" {Fore.RED}[!] UNEXPECTED{Style.RESET_ALL} {Fore.WHITE}{name:<22}{Style.RESET_ALL} {Fore.RED}(HTTP {status}){Style.RESET_ALL}")
+
     except asyncio.TimeoutError:
-        record["status_code"] = "TIMEOUT"
-        record["category"] = "TIMEOUT"
-        print(
-            f"{Fore.RED}{Style.BRIGHT}[!] TIMEOUT{Style.RESET_ALL}   "
-            f"{name:<16} -> {url} (Exceeded 5.0s){Style.RESET_ALL}"
-        )
+        record["state"] = "TIMEOUT"
+        print(f" {Fore.RED}[!] TIMEOUT   {Style.RESET_ALL} {Fore.WHITE}{name:<22}{Style.RESET_ALL} {Fore.RED}(Timeout > 5.0s){Style.RESET_ALL}")
     except aiohttp.ClientError as e:
-        record["status_code"] = "CLIENT_ERROR"
-        record["category"] = "ERROR"
-        print(
-            f"{Fore.RED}[!] ERROR{Style.RESET_ALL}     "
-            f"{name:<16} -> {url} (Connection Error: {e}){Style.RESET_ALL}"
-        )
+        record["state"] = "CONNECTION_ERROR"
+        print(f" {Fore.RED}[!] ERROR     {Style.RESET_ALL} {Fore.WHITE}{name:<22}{Style.RESET_ALL} {Fore.RED}({e.__class__.__name__}){Style.RESET_ALL}")
 
     return record
 
 
-def save_report(filepath: str, records: List[Dict[str, Any]], target: str, duration_sec: float) -> None:
-    """
-    Writes the audit telemetry records and summary metrics to a structured JSON file on disk.
-    """
-    found_count = sum(1 for r in records if r.get("category") == "FOUND")
-    not_found_count = sum(1 for r in records if r.get("category") == "NOT_FOUND")
-    blocked_count = sum(1 for r in records if r.get("category") == "BLOCKED")
-    timeout_count = sum(1 for r in records if r.get("category") == "TIMEOUT")
-    error_count = sum(1 for r in records if r.get("category") == "ERROR")
-
-    report: Dict[str, Any] = {
-        "metadata": {
-            "target": target,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime()),
-            "duration_seconds": round(duration_sec, 2),
-            "total_endpoints": len(records),
-        },
-        "summary": {
-            "found": found_count,
-            "not_found": not_found_count,
-            "blocked": blocked_count,
-            "timeout": timeout_count,
-            "errors": error_count,
-        },
-        "results": records,
-    }
-
+def save_report(filepath: str, target: str, records: List[Dict[str, Any]], duration: float) -> None:
+    """Exports structured telemetry findings to JSON on disk."""
     try:
+        found_count = sum(1 for r in records if r["state"] == "FOUND")
+        not_found_count = sum(1 for r in records if r["state"] == "NOT_FOUND")
+        blocked_count = sum(1 for r in records if r["state"] in ("BLOCKED", "TIMEOUT", "CONNECTION_ERROR", "UNEXPECTED"))
+
+        report = {
+            "target": target,
+            "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "duration_seconds": round(duration, 3),
+            "summary": {
+                "total_audited": len(records),
+                "found": found_count,
+                "not_found": not_found_count,
+                "blocked_or_error": blocked_count
+            },
+            "results": records
+        }
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=4)
-        print(f"\n{Fore.GREEN}[+] Telemetry report successfully exported to '{filepath}'.{Style.RESET_ALL}")
+        print(f"\n{Fore.GREEN}[✓] Telemetry report exported to: {Fore.CYAN}{filepath}{Style.RESET_ALL}")
     except IOError as e:
-        print(f"\n{Fore.RED}[!] Failed to write telemetry report to '{filepath}': {e}{Style.RESET_ALL}")
+        print(f"\n{Fore.RED}[!] Error writing telemetry report to '{filepath}': {e}{Style.RESET_ALL}")
 
 
-async def run_audit(target: str, output_path: str, config_path: Optional[str] = None) -> None:
-    """
-    Asynchronously coordinates the endpoint queries, collects metrics, and prints the summary footer.
-    """
-    endpoints: List[Dict[str, Any]] = load_endpoints(filepath=config_path, target=target)
+async def run_audit(target: str, output_path: Optional[str], config_path: Optional[str]) -> None:
+    """Coordinates concurrent auditing over the event loop."""
+    endpoints = load_endpoints(target=target, config_path=config_path)
     if not endpoints:
-        print(f"{Fore.YELLOW}[!] No valid endpoints configured. Exiting...{Style.RESET_ALL}")
+        print(f"{Fore.RED}[!] No valid endpoints configured. Exiting...{Style.RESET_ALL}")
         return
 
-    banner = (
-        f"{Fore.CYAN}{Style.BRIGHT}"
-        f"+-------------------------------------------------------------+\n"
-        f"|           NetCheck-OSINT :: Identity & Network Auditor      |\n"
-        f"+-------------------------------------------------------------+{Style.RESET_ALL}\n"
-        f"[*] Target Identity : {Fore.YELLOW}{target}{Style.RESET_ALL}\n"
-        f"[*] Endpoints Total : {len(endpoints)}\n"
-        f"[*] Scan Strategy   : Async Concurrent Event Loop (Timeout: 5.0s)\n"
-    )
-    print(banner)
+    print(f"\n{Fore.CYAN}{'='*65}{Style.RESET_ALL}")
+    print(f" {Fore.GREEN}{Style.BRIGHT}NetCheck-OSINT{Style.RESET_ALL} - High-Performance Identity Auditor")
+    print(f" Target Handle  : {Fore.YELLOW}{target}{Style.RESET_ALL}")
+    print(f" Total Services : {Fore.WHITE}{len(endpoints)}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}{'='*65}{Style.RESET_ALL}\n")
 
-    start_time = time.time()
+    start_time = time.perf_counter()
 
     async with aiohttp.ClientSession() as session:
-        tasks = [check_endpoint(session, endpoint) for endpoint in endpoints]
+        tasks = [check_endpoint(session, ep) for ep in endpoints]
         records: List[Dict[str, Any]] = await asyncio.gather(*tasks)
 
-    elapsed = time.time() - start_time
+    elapsed = time.perf_counter() - start_time
+    found = sum(1 for r in records if r["state"] == "FOUND")
+    not_found = sum(1 for r in records if r["state"] == "NOT_FOUND")
+    blocked = len(records) - found - not_found
 
-    # Summary counts
-    found_count = sum(1 for r in records if r.get("category") == "FOUND")
-    not_found_count = sum(1 for r in records if r.get("category") == "NOT_FOUND")
-    blocked_count = sum(1 for r in records if r.get("category") == "BLOCKED")
-    timeout_count = sum(1 for r in records if r.get("category") == "TIMEOUT")
-    error_count = sum(1 for r in records if r.get("category") == "ERROR")
+    print(f"\n{Fore.CYAN}{'-'*65}{Style.RESET_ALL}")
+    print(f" {Fore.GREEN}Found:{Style.RESET_ALL} {found:<4} | {Fore.WHITE}Not Found:{Style.RESET_ALL} {not_found:<4} | {Fore.YELLOW}Blocked/Errors:{Style.RESET_ALL} {blocked:<4} | {Fore.WHITE}Duration:{Style.RESET_ALL} {elapsed:.2f}s")
+    print(f"{Fore.CYAN}{'-'*65}{Style.RESET_ALL}")
 
-    # Shodan-Style Execution Summary Footer
-    print(f"\n{Fore.CYAN}{'=' * 61}{Style.RESET_ALL}")
-    print(f"{Style.BRIGHT}SCAN SUMMARY:{Style.RESET_ALL}")
-    print(f"  {Fore.GREEN}[+] Found     :{Style.RESET_ALL} {found_count}")
-    print(f"  {Fore.LIGHTBLACK_EX}[-] Not Found :{Style.RESET_ALL} {not_found_count}")
-    print(f"  {Fore.YELLOW}[!] Blocked   :{Style.RESET_ALL} {blocked_count}")
-    print(f"  {Fore.RED}[!] Timed Out :{Style.RESET_ALL} {timeout_count}")
-    if error_count:
-        print(f"  {Fore.RED}[!] Errors    :{Style.RESET_ALL} {error_count}")
-    print(f"  [*] Duration  : {elapsed:.2f}s")
-    print(f"{Fore.CYAN}{'=' * 61}{Style.RESET_ALL}")
-
-    save_report(output_path, records, target=target, duration_sec=elapsed)
+    if output_path:
+        save_report(output_path, target, records, elapsed)
 
 
 def cli() -> None:
-    """CLI entrypoint for console_scripts."""
+    """CLI entrypoint."""
     parser = argparse.ArgumentParser(
         prog="netcheck",
-        description="NetCheck-OSINT: High-performance asynchronous digital identity and endpoint auditing.",
+        description=f"{Fore.CYAN}NetCheck-OSINT: Asynchronous Digital Identity & Endpoint Auditor{Style.RESET_ALL}",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=(
-            "Examples:\n"
-            "  netcheck dhruvrathod68\n"
-            "  netcheck -u john_doe -o report.json\n"
-            "  netcheck --target alice\n"
-        ),
+        epilog="""
+Examples:
+  netcheck johndoe
+  netcheck -u torvalds -o results.json
+  netcheck -t octocat -c custom_endpoints.json
+        """
     )
     parser.add_argument(
         "username",
         nargs="?",
-        default=None,
-        help="Target username or identifier to audit across online services.",
+        help="Target username or identifier to audit across online services."
     )
     parser.add_argument(
         "-u", "--username",
         dest="username_flag",
-        type=str,
-        help="Target username or identifier.",
+        help="Target username or identifier."
     )
     parser.add_argument(
         "-t", "--target",
         dest="target_flag",
-        type=str,
-        help="Alias for target username/identifier.",
+        help="Alias for target username/identifier."
     )
     parser.add_argument(
         "-c", "--config",
         dest="config_path",
-        type=str,
-        default=None,
-        help="Custom path to endpoints.json configuration.",
+        help="Custom path to endpoints.json configuration."
     )
     parser.add_argument(
         "-o", "--output",
-        type=str,
-        default="results.json",
-        help="File path to export JSON telemetry report (default: results.json).",
+        dest="output",
+        help="File path to export JSON telemetry report."
     )
 
     args = parser.parse_args()
+    target = args.username or args.username_flag or args.target_flag
 
-    # Extract target username from positional argument or flags
-    target: Optional[str] = args.username or args.username_flag or args.target_flag
-    if target:
-        target = target.strip()
-
-    # Strict input validation: exit code 1 if empty or missing
-    if not target:
-        print(
-            f"{Fore.RED}[!] Error: Target username is required.\n"
-            f"Please specify a username as a positional argument or use -u/--username, -t/--target.{Style.RESET_ALL}\n"
-        )
+    if not target or not target.strip():
+        print(f"{Fore.RED}[!] Error: Target username is required.{Style.RESET_ALL}")
+        print("Please specify a username as a positional argument or use -u/--username, -t/--target.\n")
         parser.print_help()
         sys.exit(1)
 
     try:
-        asyncio.run(run_audit(target=target, output_path=args.output, config_path=args.config_path))
+        asyncio.run(run_audit(target.strip(), args.output, args.config_path))
     except KeyboardInterrupt:
         print(f"\n{Fore.YELLOW}[!] Audit interrupted by user.{Style.RESET_ALL}")
         sys.exit(0)
