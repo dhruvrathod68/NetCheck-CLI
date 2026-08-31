@@ -22,7 +22,7 @@ else:
 
 setup(
     name="netcheck-osint",
-    version="0.1.3",
+    version="0.1.4",
     description="A high-performance, asynchronous digital identity validation and network endpoint auditing tool.",
     long_description=long_description,
     long_description_content_type="text/markdown",
