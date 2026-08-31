@@ -1,6 +1,6 @@
 # NetCheck-CLI (netcheck-osint)
 
-[![PyPI Version](https://img.shields.io/pypi/v/netcheck-osint.sv)](https://pypi.org/project/netcheck-osint/)
+[![PyPI Version](https://img.shields.io/pypi/v/netcheck-osint.svg)](https://pypi.org/project/netcheck-osint/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Concurrency: AsyncIO](https://img.shields.io/badge/concurrency-asyncio%20%7C%20aiohttp-brightgreen.svg)](https://docs.python.org/3/library/asyncio.html)
